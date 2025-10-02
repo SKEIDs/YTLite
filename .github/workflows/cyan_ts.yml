@@ -46,6 +46,19 @@ on:
         required: true
         default: false
 
+      # 新機能: URLから追加のdeb/dylibを注入
+      custom_deb_urls:
+        description: "Additional .deb URLs (comma-separated, e.g., https://example.com/tweak1.deb,https://example.com/tweak2.deb)"
+        default: ""
+        required: false
+        type: string
+
+      custom_dylib_urls:
+        description: "Additional .dylib URLs (comma-separated, e.g., https://example.com/tweak1.dylib,https://example.com/tweak2.dylib)"
+        default: ""
+        required: false
+        type: string
+
       tweak_version:
         description: "The version of the tweak to use. Enter the version manually from dayanch96/YTLite/releases or leave default"
         default: "5.2b3"
@@ -134,6 +147,37 @@ jobs:
         run: |
           deb_url="https://github.com/dayanch96/YTLite/releases/download/v${{ inputs.tweak_version }}/com.dvntm.ytlite_${{ inputs.tweak_version }}_iphoneos-arm.deb"
           wget "$deb_url" --no-verbose -O ${{ github.workspace }}/ytplus.deb
+
+      # 新ステップ: カスタムdebファイルのダウンロード
+      - name: Download Custom .deb Files
+        if: ${{ inputs.custom_deb_urls != '' }}
+        run: |
+          IFS=',' read -ra URLS <<< "${{ inputs.custom_deb_urls }}"
+          counter=1
+          for url in "${URLS[@]}"; do
+            url=$(echo "$url" | xargs)  # trim whitespace
+            if [ -n "$url" ]; then
+              echo "Downloading custom deb #$counter from: $url"
+              wget "$url" --no-verbose -O ${{ github.workspace }}/custom_deb_${counter}.deb
+              counter=$((counter + 1))
+            fi
+          done
+
+      # 新ステップ: カスタムdylibファイルのダウンロード
+      - name: Download Custom .dylib Files
+        if: ${{ inputs.custom_dylib_urls != '' }}
+        run: |
+          mkdir -p ${{ github.workspace }}/custom_dylibs
+          IFS=',' read -ra URLS <<< "${{ inputs.custom_dylib_urls }}"
+          counter=1
+          for url in "${URLS[@]}"; do
+            url=$(echo "$url" | xargs)  # trim whitespace
+            if [ -n "$url" ]; then
+              echo "Downloading custom dylib #$counter from: $url"
+              wget "$url" --no-verbose -O ${{ github.workspace }}/custom_dylibs/custom_${counter}.dylib
+              counter=$((counter + 1))
+            fi
+          done
 
       - name: Clone Open in YouTube (Safari extension)
         if: ${{ inputs.create_cyan }}
@@ -298,6 +342,24 @@ jobs:
             fi
           done
 
+          # カスタムdebファイルを追加
+          for custom_deb in custom_deb_*.deb; do
+            if [ -f "$custom_deb" ]; then
+              echo "Adding custom deb: $custom_deb"
+              tweaks="$tweaks $custom_deb"
+            fi
+          done
+
+          # カスタムdylibファイルを追加
+          if [ -d "custom_dylibs" ] && [ "$(ls -A custom_dylibs)" ]; then
+            for custom_dylib in custom_dylibs/*.dylib; do
+              if [ -f "$custom_dylib" ]; then
+                echo "Adding custom dylib: $custom_dylib"
+                tweaks="$tweaks $custom_dylib"
+              fi
+            done
+          fi
+
           cgen -uwef $tweaks -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} -o cyan_YouTubePlus_${{ inputs.tweak_version }}.cyan
 
       - name: Generate .zip file for TrollFools
@@ -315,6 +377,12 @@ jobs:
               rm -rf tmp_deb
             fi
           done
+
+          # カスタムdylibファイルを追加
+          if [ -d "custom_dylibs" ] && [ "$(ls -A custom_dylibs)" ]; then
+            echo "Adding custom dylib files to TrollFools package..."
+            cp custom_dylibs/*.dylib ytp_tf/
+          fi
 
           echo "Zipping..."
           cd ytp_tf
